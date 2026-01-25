@@ -146,12 +146,16 @@ export const ThreadView = observer(function ThreadView() {
   const isNearBottom = useRef(true);
   const candidatesDividerRef = useRef<HTMLDivElement>(null);
   const initialScrollDone = useRef(false);
+  const thoughtsLoaded = useRef(false);
 
   // Load thread and thoughts, focus input
   useEffect(() => {
     if (id) {
       initialScrollDone.current = false;
-      threadsStore.loadThoughts(id);
+      thoughtsLoaded.current = false;
+      threadsStore.loadThoughts(id).then(() => {
+        thoughtsLoaded.current = true;
+      });
       // Focus textarea when entering thread
       setTimeout(() => {
         inputRef.current?.focus();
@@ -194,8 +198,8 @@ export const ThreadView = observer(function ThreadView() {
       // Cancel any ongoing generation when leaving the thread
       threadsStore.cancelGeneration();
       
-      if (id) {
-        // Check if thread is empty (no selected thoughts)
+      if (id && thoughtsLoaded.current) {
+        // Only check for empty thread if thoughts were actually loaded
         const thoughts = threadsStore.thoughts.get(id) || [];
         const selectedCount = thoughts.filter(t => t.selected).length;
         
@@ -323,19 +327,32 @@ export const ThreadView = observer(function ThreadView() {
   const selectedThoughts = thoughts.filter(t => t.selected);
   const unselectedThoughts = thoughts.filter(t => !t.selected);
 
+  // If thread not found, redirect to home (don't show loading state)
+  useEffect(() => {
+    if (!thread && id) {
+      // Thread not found - might be deleted or invalid id
+      // Wait a moment in case threads are still loading, then redirect
+      const timer = setTimeout(() => {
+        if (!threadsStore.threads.find(t => t.id === id)) {
+          navigate('/');
+        }
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [thread, id, navigate, threadsStore.threads]);
+
   if (!thread) {
+    // Show minimal loading state while checking
     return (
       <div className="app">
         <header className="header">
           <button className="header-btn" onClick={() => navigate('/')}>
             <IconBack />
           </button>
-          <h1 className="header-title">Loading...</h1>
+          <h1 className="header-title"></h1>
           <div className="header-btn" />
         </header>
-        <div className="content">
-          <div className="spinner" />
-        </div>
+        <div className="content" />
       </div>
     );
   }

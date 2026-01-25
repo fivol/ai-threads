@@ -128,6 +128,30 @@ a {
   padding: 0 var(--space-md);
 }
 
+.header-title-clickable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-md);
+  transition: background 0.15s;
+}
+
+.header-title-clickable:hover {
+  background: var(--color-surface-hover);
+}
+
+.header-title-input {
+  flex: 1;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+  background: var(--color-bg);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-md);
+  color: var(--color-text);
+  outline: none;
+}
+
 .header-btn {
   width: 40px;
   height: 40px;
@@ -153,6 +177,10 @@ a {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.content-with-toolbar {
+  padding-bottom: 80px;
 }
 
 /* Footer / Input area */
@@ -296,30 +324,60 @@ a {
   color: var(--color-text);
 }
 
-/* New thread button */
-.new-thread-btn {
+/* Bottom toolbar */
+.toolbar {
   position: fixed;
   bottom: 24px;
-  right: 24px;
-  width: 56px;
-  height: 56px;
-  background: var(--color-accent);
-  border-radius: 50%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+}
+
+.toolbar-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-  transition: transform 0.15s, background 0.15s;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  transition: background 0.15s, color 0.15s;
 }
 
-.new-thread-btn:hover {
-  transform: scale(1.05);
-  background: var(--color-accent-hover);
+.toolbar-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 
-.new-thread-btn svg {
-  width: 24px;
+.toolbar-btn-primary {
+  color: var(--color-accent);
+}
+
+.toolbar-btn-primary:hover {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--color-accent-hover);
+}
+
+.toolbar-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.toolbar-divider {
+  width: 1px;
   height: 24px;
+  background: var(--color-border);
+  margin: 0 4px;
 }
 
 /* Thought card */
@@ -378,6 +436,11 @@ a {
   transition: opacity 0.15s, color 0.15s;
 }
 
+.thought-star svg {
+  width: 16px;
+  height: 16px;
+}
+
 .thought:hover .thought-star {
   opacity: 1;
 }
@@ -430,6 +493,55 @@ a {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Generation loader with cancel on hover */
+.generation-loader {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-xl);
+  cursor: pointer;
+  position: relative;
+}
+
+.generation-loader .spinner-icon {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.generation-loader .cancel-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.generation-loader .cancel-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.generation-loader:hover .spinner-icon {
+  opacity: 0;
+}
+
+.generation-loader:hover .cancel-icon {
+  opacity: 1;
+  color: var(--color-error);
 }
 
 /* Empty state */

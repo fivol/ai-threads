@@ -7,7 +7,7 @@ import { observer } from 'mobx-react-lite';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useStores } from '../stores';
 import type { Thought } from '../types';
-import { IconBack, IconStar, IconSend, IconSettings, IconEdit, IconTrash, IconSparkles } from './Icons';
+import { IconBack, IconStar, IconSend, IconSettings, IconEdit, IconTrash, IconSparkles, IconClose } from './Icons';
 
 interface ThoughtCardProps {
   thought: Thought;
@@ -136,34 +136,90 @@ export const ThreadView = observer(function ThreadView() {
   const [input, setInput] = useState('');
   const [editingThought, setEditingThought] = useState<Thought | null>(null);
   const [editText, setEditText] = useState('');
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState('');
   
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const lastScrollTop = useRef(0);
   const isNearBottom = useRef(true);
+  const candidatesDividerRef = useRef<HTMLDivElement>(null);
+  const initialScrollDone = useRef(false);
 
-  // Load thread and thoughts
+  // Load thread and thoughts, focus input
   useEffect(() => {
     if (id) {
+      initialScrollDone.current = false;
       threadsStore.loadThoughts(id);
+      // Focus textarea when entering thread
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
     }
   }, [id, threadsStore]);
 
-  // Auto-scroll to bottom when new thoughts appear
+  // On initial load, scroll to the beginning of candidates (end of selected)
   useEffect(() => {
-    if (contentRef.current && isNearBottom.current) {
-      contentRef.current.scrollTop = contentRef.current.scrollHeight;
-    }
-  }, [threadsStore.thoughts.get(id || '')?.length]);
+    if (!contentRef.current || initialScrollDone.current) return;
+    
+    const thoughts = threadsStore.thoughts.get(id || '') || [];
+    if (thoughts.length === 0) return;
+    
+    const selected = thoughts.filter(t => t.selected);
+    const unselected = thoughts.filter(t => !t.selected);
+    
+    // Wait a bit for DOM to render
+    requestAnimationFrame(() => {
+      if (selected.length > 0 && unselected.length > 0 && candidatesDividerRef.current) {
+        // Scroll to the divider (beginning of candidates)
+        candidatesDividerRef.current.scrollIntoView({ block: 'start' });
+      } else if (selected.length === 0 && unselected.length > 0) {
+        // Only candidates exist, scroll to top
+        contentRef.current!.scrollTop = 0;
+      } else {
+        // Only selected (or empty), scroll to bottom
+        contentRef.current!.scrollTop = contentRef.current!.scrollHeight;
+      }
+      initialScrollDone.current = true;
+    });
+  }, [id, threadsStore.thoughts.get(id || '')?.length]);
 
-  // Generate title on unmount if needed
+  // Note: We intentionally don't auto-scroll when new thoughts are generated.
+  // The loader is replaced by new thoughts in place, keeping the scroll position static.
+
+  // Cleanup on unmount: cancel generation, delete empty thread, generate title async
   useEffect(() => {
     return () => {
+      // Cancel any ongoing generation when leaving the thread
+      threadsStore.cancelGeneration();
+      
       if (id) {
-        threadsStore.generateThreadTitle(id);
+        // Check if thread is empty (no selected thoughts)
+        const thoughts = threadsStore.thoughts.get(id) || [];
+        const selectedCount = thoughts.filter(t => t.selected).length;
+        
+        if (selectedCount === 0) {
+          // Delete empty thread
+          threadsStore.deleteThread(id);
+        } else {
+          // Generate title asynchronously (don't block)
+          threadsStore.generateThreadTitle(id);
+        }
       }
     };
   }, [id, threadsStore]);
+
+  // Auto-resize textarea
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    // Auto-resize textarea
+    const textarea = e.target;
+    textarea.style.height = 'auto';
+    const lineHeight = 24; // approx line height
+    const maxHeight = lineHeight * 4; // max 4 lines
+    textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
+  };
 
   const handleScroll = useCallback(() => {
     if (!contentRef.current || !id) return;
@@ -194,6 +250,11 @@ export const ThreadView = observer(function ThreadView() {
     const text = input.trim();
     setInput('');
     
+    // Reset textarea height
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
+    
     // Focus back on input immediately after clearing
     requestAnimationFrame(() => {
       inputRef.current?.focus();
@@ -201,11 +262,11 @@ export const ThreadView = observer(function ThreadView() {
     
     await threadsStore.addUserThought(id, text);
     
-    // Auto-generate after user input if configured
+    // Regenerate candidates after user input (delete existing and create new)
     if (settingsStore.isConfigured) {
       setTimeout(() => {
-        threadsStore.generateBatch(id);
-      }, 500);
+        threadsStore.generateBatch(id, true); // regenerate = true
+      }, 300);
     }
   };
 
@@ -227,6 +288,33 @@ export const ThreadView = observer(function ThreadView() {
     if (!id) return;
     if (confirm('Delete this thought?')) {
       await threadsStore.deleteThought(thought.id, id);
+    }
+  };
+
+  const handleTitleClick = () => {
+    if (thread) {
+      setTitleInput(thread.title === 'Untitled' ? '' : thread.title);
+      setEditingTitle(true);
+      setTimeout(() => titleInputRef.current?.focus(), 50);
+    }
+  };
+
+  const handleTitleSave = async () => {
+    if (!id || !thread) return;
+    const newTitle = titleInput.trim() || 'Untitled';
+    thread.title = newTitle;
+    setEditingTitle(false);
+    // Save to db
+    const { saveThread } = await import('../db');
+    await saveThread(thread);
+  };
+
+  const handleTitleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleTitleSave();
+    } else if (e.key === 'Escape') {
+      setEditingTitle(false);
     }
   };
 
@@ -257,16 +345,30 @@ export const ThreadView = observer(function ThreadView() {
       <header className="header">
         <button
           className="header-btn"
-          onClick={async () => {
-            if (id) {
-              await threadsStore.generateThreadTitle(id);
-            }
-            navigate('/');
-          }}
+          onClick={() => navigate('/')}
         >
           <IconBack />
         </button>
-        <h1 className="header-title">{thread.title}</h1>
+        {editingTitle ? (
+          <input
+            ref={titleInputRef}
+            type="text"
+            className="header-title-input"
+            value={titleInput}
+            onChange={(e) => setTitleInput(e.target.value)}
+            onBlur={handleTitleSave}
+            onKeyDown={handleTitleKeyDown}
+            placeholder="Thread title..."
+          />
+        ) : (
+          <h1 
+            className="header-title header-title-clickable" 
+            onClick={handleTitleClick}
+            title="Click to edit"
+          >
+            {thread.title}
+          </h1>
+        )}
         <button className="header-btn" onClick={() => navigate(`/thread/${id}/settings`)}>
           <IconSettings />
         </button>
@@ -297,7 +399,7 @@ export const ThreadView = observer(function ThreadView() {
 
         {/* Divider between selected and candidates */}
         {selectedThoughts.length > 0 && unselectedThoughts.length > 0 && (
-          <div className="divider">candidates</div>
+          <div ref={candidatesDividerRef} className="divider">candidates</div>
         )}
 
         {/* Unselected thoughts (candidates) */}
@@ -318,9 +420,18 @@ export const ThreadView = observer(function ThreadView() {
           />
         ))}
 
-        {/* Loading indicator */}
+        {/* Loading indicator with cancel on hover */}
         {threadsStore.isGenerating && (
-          <div className="spinner" />
+          <div 
+            className="generation-loader"
+            onClick={() => threadsStore.cancelGeneration()}
+            title="Click to cancel"
+          >
+            <div className="spinner-icon" />
+            <div className="cancel-icon">
+              <IconClose />
+            </div>
+          </div>
         )}
 
         {/* Empty state */}
@@ -336,7 +447,12 @@ export const ThreadView = observer(function ThreadView() {
         <div className="input-row">
           <button
             className="header-btn"
-            onClick={() => id && threadsStore.generateBatch(id)}
+            onClick={() => {
+              if (!id) return;
+              // If there are existing candidates, regenerate (delete them and create new)
+              const shouldRegenerate = threadsStore.hasUnselectedCandidates(id);
+              threadsStore.generateBatch(id, shouldRegenerate);
+            }}
             disabled={threadsStore.isGenerating || !settingsStore.isConfigured}
             title={!settingsStore.isConfigured ? 'Configure API key in settings' : 'Generate thoughts'}
           >
@@ -346,7 +462,7 @@ export const ThreadView = observer(function ThreadView() {
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder="Write a thought..."
               rows={1}

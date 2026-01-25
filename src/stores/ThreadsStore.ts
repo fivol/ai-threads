@@ -12,6 +12,7 @@ import {
   deleteThread as dbDeleteThread,
   getThoughtsByThread,
   getThoughtCountByThread,
+  getSelectedThoughtCountByThread,
   getStarredThoughts,
   saveThought,
   saveThoughts,
@@ -27,12 +28,14 @@ export class ThreadsStore {
   starredThoughts: Thought[] = [];
   currentThreadId: string | null = null;
   threadCounts: Map<string, number> = new Map();
+  selectedCounts: Map<string, number> = new Map();
   
   isLoading = false;
   isGenerating = false;
   error: string | null = null;
 
   private settingsStore: SettingsStore;
+  private abortController: AbortController | null = null;
 
   constructor(settingsStore: SettingsStore) {
     this.settingsStore = settingsStore;
@@ -57,9 +60,13 @@ export class ThreadsStore {
 
       await Promise.all(
         normalizedThreads.map(async (thread) => {
-          const count = await getThoughtCountByThread(thread.id);
+          const [count, selectedCount] = await Promise.all([
+            getThoughtCountByThread(thread.id),
+            getSelectedThoughtCountByThread(thread.id),
+          ]);
           runInAction(() => {
             this.threadCounts.set(thread.id, count);
+            this.selectedCounts.set(thread.id, selectedCount);
           });
           if (thread.generationCount === undefined) {
             await saveThread(thread);
@@ -83,6 +90,7 @@ export class ThreadsStore {
       runInAction(() => {
         this.thoughts.set(threadId, thoughts);
         this.threadCounts.set(threadId, thoughts.length);
+        this.selectedCounts.set(threadId, thoughts.filter(t => t.selected).length);
       });
     } catch (error) {
       runInAction(() => {
@@ -127,6 +135,7 @@ export class ThreadsStore {
       this.threads.unshift(thread);
       this.thoughts.set(thread.id, []);
       this.threadCounts.set(thread.id, 0);
+      this.selectedCounts.set(thread.id, 0);
     });
 
     return thread;
@@ -141,6 +150,7 @@ export class ThreadsStore {
       this.threads = this.threads.filter(t => t.id !== threadId);
       this.thoughts.delete(threadId);
       this.threadCounts.delete(threadId);
+      this.selectedCounts.delete(threadId);
     });
   }
 
@@ -204,6 +214,8 @@ export class ThreadsStore {
       thoughts.push(thought);
       this.thoughts.set(threadId, thoughts);
       this.threadCounts.set(threadId, thoughts.length);
+      // User thoughts are selected by default
+      this.selectedCounts.set(threadId, (this.selectedCounts.get(threadId) || 0) + 1);
     });
 
     // Update thread timestamp
@@ -217,15 +229,40 @@ export class ThreadsStore {
   }
 
   /**
-   * Toggle thought selection
+   * Toggle thought selection.
+   * When selecting a candidate, delete all unselected candidates BEFORE it
+   * (user has seen them and didn't select them).
    */
   async toggleSelected(thoughtId: string, threadId: string): Promise<void> {
     const thoughts = this.thoughts.get(threadId);
     const thought = thoughts?.find(t => t.id === thoughtId);
     if (!thought) return;
 
+    const wasSelected = thought.selected;
     thought.selected = !thought.selected;
     await saveThought(thought);
+
+    // Update selected count
+    const selectedDelta = thought.selected ? 1 : -1;
+    this.selectedCounts.set(threadId, (this.selectedCounts.get(threadId) || 0) + selectedDelta);
+
+    // If we just selected a candidate (AI thought), delete all unselected candidates before it
+    if (!wasSelected && thought.author === 'ai') {
+      const unselectedBefore = thoughts!.filter(
+        t => !t.selected && t.author === 'ai' && t.order < thought.order
+      );
+
+      if (unselectedBefore.length > 0) {
+        const idsToDelete = unselectedBefore.map(t => t.id);
+        await deleteThoughts(idsToDelete);
+        
+        runInAction(() => {
+          const filtered = thoughts!.filter(t => !idsToDelete.includes(t.id));
+          this.thoughts.set(threadId, filtered);
+          this.threadCounts.set(threadId, filtered.length);
+        });
+      }
+    }
   }
 
   /**
@@ -260,23 +297,43 @@ export class ThreadsStore {
    * Delete a thought
    */
   async deleteThought(thoughtId: string, threadId: string): Promise<void> {
+    const thoughts = this.thoughts.get(threadId);
+    const thought = thoughts?.find(t => t.id === thoughtId);
+    const wasSelected = thought?.selected || false;
+
     await dbDeleteThought(thoughtId);
     runInAction(() => {
-      const thoughts = this.thoughts.get(threadId);
       if (thoughts) {
         const index = thoughts.findIndex(t => t.id === thoughtId);
         if (index !== -1) {
           thoughts.splice(index, 1);
         }
         this.threadCounts.set(threadId, thoughts.length);
+        if (wasSelected) {
+          this.selectedCounts.set(threadId, Math.max(0, (this.selectedCounts.get(threadId) || 0) - 1));
+        }
       }
     });
   }
 
   /**
-   * Generate new AI thought candidates
+   * Cancel any ongoing generation
    */
-  async generateBatch(threadId: string): Promise<void> {
+  cancelGeneration(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+      runInAction(() => {
+        this.isGenerating = false;
+      });
+    }
+  }
+
+  /**
+   * Generate new AI thought candidates
+   * @param regenerate - if true, delete existing unselected candidates before generating
+   */
+  async generateBatch(threadId: string, regenerate = false): Promise<void> {
     if (this.isGenerating) return;
     if (!this.settingsStore.isConfigured) {
       this.error = 'Please configure API key and model in settings';
@@ -286,9 +343,28 @@ export class ThreadsStore {
     const thread = this.threads.find(t => t.id === threadId);
     if (!thread) return;
 
-    const thoughts = this.thoughts.get(threadId) || [];
+    let thoughts = this.thoughts.get(threadId) || [];
+
+    // If regenerating, delete all existing unselected AI candidates first
+    if (regenerate) {
+      const unselectedCandidates = thoughts.filter(t => t.author === 'ai' && !t.selected);
+      if (unselectedCandidates.length > 0) {
+        const idsToDelete = unselectedCandidates.map(t => t.id);
+        await deleteThoughts(idsToDelete);
+        
+        thoughts = thoughts.filter(t => !idsToDelete.includes(t.id));
+        runInAction(() => {
+          this.thoughts.set(threadId, thoughts);
+          this.threadCounts.set(threadId, thoughts.length);
+        });
+      }
+    }
+
     const selectedThoughts = thoughts.filter(t => t.selected);
 
+    // Create new AbortController for this request
+    this.abortController = new AbortController();
+    
     this.isGenerating = true;
     this.error = null;
 
@@ -301,6 +377,7 @@ export class ThreadsStore {
         model: this.settingsStore.settings.model,
         apiKey: this.settingsStore.settings.apiKey,
         count: thread.generationCount ?? 3,
+        signal: this.abortController.signal,
       });
 
       const maxOrder = thoughts.length > 0 
@@ -336,11 +413,28 @@ export class ThreadsStore {
         this.isGenerating = false;
       });
     } catch (error) {
+      // Don't show error if request was cancelled
+      if (error instanceof Error && error.name === 'AbortError') {
+        runInAction(() => {
+          this.isGenerating = false;
+        });
+        return;
+      }
       runInAction(() => {
         this.error = error instanceof Error ? error.message : 'Generation failed';
         this.isGenerating = false;
       });
+    } finally {
+      this.abortController = null;
     }
+  }
+
+  /**
+   * Check if there are existing unselected AI candidates in the thread
+   */
+  hasUnselectedCandidates(threadId: string): boolean {
+    const thoughts = this.thoughts.get(threadId) || [];
+    return thoughts.some(t => t.author === 'ai' && !t.selected);
   }
 
   /**
@@ -446,5 +540,72 @@ export class ThreadsStore {
    */
   get unpinnedThreads(): Thread[] {
     return this.threads.filter(t => !t.pinned);
+  }
+
+  /**
+   * Import data from exported JSON
+   */
+  async importData(data: {
+    threads: Array<{
+      id: string;
+      title: string;
+      createdAt: number;
+      updatedAt: number;
+      pinned: boolean;
+      threadPrompt: string | null;
+      thoughts: Array<{
+        id: string;
+        author: 'user' | 'ai';
+        text: string;
+        createdAt: number;
+        starred: boolean;
+        edited: boolean;
+        order: number;
+      }>;
+    }>;
+  }): Promise<void> {
+    if (!data.threads || !Array.isArray(data.threads)) {
+      throw new Error('Invalid import data');
+    }
+
+    for (const threadData of data.threads) {
+      // Create thread
+      const thread: Thread = {
+        id: uuid(),
+        title: threadData.title,
+        createdAt: threadData.createdAt || Date.now(),
+        updatedAt: threadData.updatedAt || Date.now(),
+        pinned: threadData.pinned || false,
+        threadPrompt: threadData.threadPrompt || null,
+        generationCount: 3,
+        stats: { tokensIn: 0, tokensOut: 0 },
+      };
+
+      await saveThread(thread);
+
+      // Create thoughts
+      const thoughts: Thought[] = (threadData.thoughts || []).map((t, i) => ({
+        id: uuid(),
+        threadId: thread.id,
+        author: t.author,
+        text: t.text,
+        createdAt: t.createdAt || Date.now(),
+        selected: true, // All imported thoughts are selected
+        starred: t.starred || false,
+        edited: t.edited || false,
+        order: t.order ?? i,
+      }));
+
+      if (thoughts.length > 0) {
+        await saveThoughts(thoughts);
+      }
+
+      runInAction(() => {
+        this.threads.unshift(thread);
+        this.thoughts.set(thread.id, thoughts);
+        this.threadCounts.set(thread.id, thoughts.length);
+        this.selectedCounts.set(thread.id, thoughts.length);
+      });
+    }
   }
 }

@@ -162,3 +162,69 @@ export async function getThoughtCountByThread(threadId: string): Promise<number>
   const count = await db.countFromIndex('thoughts', 'by-thread', threadId);
   return count;
 }
+
+export async function getSelectedThoughtCountByThread(threadId: string): Promise<number> {
+  const db = await getDB();
+  const thoughts = await db.getAllFromIndex('thoughts', 'by-thread', threadId);
+  return thoughts.filter(t => t.selected).length;
+}
+
+/**
+ * Export all data (threads with selected thoughts only, no candidates)
+ */
+export async function exportAllData(): Promise<{
+  exportedAt: string;
+  threads: Array<{
+    id: string;
+    title: string;
+    createdAt: number;
+    updatedAt: number;
+    pinned: boolean;
+    threadPrompt: string | null;
+    thoughts: Array<{
+      id: string;
+      author: 'user' | 'ai';
+      text: string;
+      createdAt: number;
+      starred: boolean;
+      edited: boolean;
+      order: number;
+    }>;
+  }>;
+}> {
+  const db = await getDB();
+  const threads = await db.getAllFromIndex('threads', 'by-updated');
+  
+  const exportData = {
+    exportedAt: new Date().toISOString(),
+    threads: await Promise.all(
+      threads.map(async (thread) => {
+        const thoughts = await db.getAllFromIndex('thoughts', 'by-thread', thread.id);
+        const selectedThoughts = thoughts
+          .filter(t => t.selected)
+          .sort((a, b) => a.order - b.order)
+          .map(t => ({
+            id: t.id,
+            author: t.author,
+            text: t.text,
+            createdAt: t.createdAt,
+            starred: t.starred,
+            edited: t.edited,
+            order: t.order,
+          }));
+        
+        return {
+          id: thread.id,
+          title: thread.title,
+          createdAt: thread.createdAt,
+          updatedAt: thread.updatedAt,
+          pinned: thread.pinned,
+          threadPrompt: thread.threadPrompt,
+          thoughts: selectedThoughts,
+        };
+      })
+    ),
+  };
+  
+  return exportData;
+}

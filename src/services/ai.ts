@@ -77,6 +77,7 @@ interface GenerateOptions {
   model: string;
   apiKey: string;
   count?: number;
+  signal?: AbortSignal;
 }
 
 interface GenerateResult {
@@ -139,7 +140,7 @@ function parseResponse(text: string, existingTexts: Set<string>): string[] {
  * Generate new thought candidates using the AI
  */
 export async function generateThoughts(options: GenerateOptions): Promise<GenerateResult> {
-  const { thoughts, globalPrompt, threadPrompt, provider, model, apiKey, count = 3 } = options;
+  const { thoughts, globalPrompt, threadPrompt, provider, model, apiKey, count = 3, signal } = options;
   
   if (!apiKey || !model) {
     throw new Error('API key and model are required');
@@ -166,6 +167,7 @@ export async function generateThoughts(options: GenerateOptions): Promise<Genera
         temperature: 0.9,
         max_completion_tokens: 1000,
       }),
+      signal,
     });
 
     if (!response.ok) {
@@ -205,6 +207,7 @@ export async function generateThoughts(options: GenerateOptions): Promise<Genera
           { role: 'user', content: context || 'Start a new line of thinking.' },
         ],
       }),
+      signal,
     });
 
     if (!response.ok) {

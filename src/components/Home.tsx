@@ -2,11 +2,12 @@
  * Home view - thread list
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { observer } from 'mobx-react-lite';
 import { useNavigate } from 'react-router-dom';
 import { useStores } from '../stores';
-import { IconPlus, IconSettings, IconStar, IconPin, IconTrash } from './Icons';
+import { IconPlus, IconSettings, IconStar, IconPin, IconTrash, IconExport, IconImport } from './Icons';
+import { exportAllData } from '../db';
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp);
@@ -29,6 +30,7 @@ function formatDate(timestamp: number): string {
 export const Home = observer(function Home() {
   const { threadsStore } = useStores();
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     threadsStore.loadThreads();
@@ -56,8 +58,46 @@ export const Home = observer(function Home() {
   };
 
   const getThoughtCountLabel = (threadId: string) => {
-    const count = threadsStore.threadCounts.get(threadId) ?? 0;
+    const count = threadsStore.selectedCounts.get(threadId) ?? 0;
     return `${count} ${count === 1 ? 'thought' : 'thoughts'}`;
+  };
+
+  const handleExport = async () => {
+    try {
+      const data = await exportAllData();
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ai-threads-export-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+    }
+  };
+
+  const handleImport = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      await threadsStore.importData(data);
+    } catch (error) {
+      console.error('Import failed:', error);
+    }
+
+    // Reset input
+    e.target.value = '';
   };
 
   if (threadsStore.isLoading) {
@@ -79,6 +119,14 @@ export const Home = observer(function Home() {
 
   return (
     <div className="app">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        style={{ display: 'none' }}
+        onChange={handleFileSelect}
+      />
+      
       <header className="header">
         <button className="header-btn" onClick={() => navigate('/starred')}>
           <IconStar />
@@ -89,7 +137,7 @@ export const Home = observer(function Home() {
         </button>
       </header>
       
-      <div className="content">
+      <div className="content content-with-toolbar">
         {threadsStore.threads.length === 0 ? (
           <div className="empty-state">
             <IconPlus />
@@ -176,9 +224,19 @@ export const Home = observer(function Home() {
         )}
       </div>
 
-      <button className="new-thread-btn" onClick={handleNewThread}>
-        <IconPlus />
-      </button>
+      {/* Bottom toolbar */}
+      <div className="toolbar">
+        <button className="toolbar-btn toolbar-btn-primary" onClick={handleNewThread} title="New Thread">
+          <IconPlus />
+        </button>
+        <div className="toolbar-divider" />
+        <button className="toolbar-btn" onClick={handleExport} title="Export">
+          <IconExport />
+        </button>
+        <button className="toolbar-btn" onClick={handleImport} title="Import">
+          <IconImport />
+        </button>
+      </div>
     </div>
   );
 });

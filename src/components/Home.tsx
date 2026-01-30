@@ -31,7 +31,15 @@ export const Home = observer(function Home() {
   const { threadsStore, settingsStore } = useStores();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showHelp, setShowHelp] = useState(false);
+  const [showHelp, setShowHelp] = useState(() => {
+    // Auto-open help on first visit
+    const hasVisited = localStorage.getItem('ai-threads-visited');
+    if (!hasVisited) {
+      localStorage.setItem('ai-threads-visited', 'true');
+      return true;
+    }
+    return false;
+  });
 
   useEffect(() => {
     threadsStore.loadThreads();

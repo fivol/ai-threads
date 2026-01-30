@@ -26,7 +26,7 @@ const ThoughtCard = observer(function ThoughtCard({
 }: ThoughtCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const longPressTimer = useRef<number>();
+  const longPressTimer = useRef<number | undefined>(undefined);
 
   const handleTouchStart = () => {
     longPressTimer.current = window.setTimeout(() => {

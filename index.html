@@ -12,6 +12,24 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Handle redirect from 404.html for GitHub Pages SPA support
+      (function() {
+        var redirect = sessionStorage.getItem('redirect');
+        if (redirect) {
+          sessionStorage.removeItem('redirect');
+          var base = document.querySelector('base');
+          var basePath = base ? base.getAttribute('href') : '/';
+          // Remove trailing slash from basePath if present
+          if (basePath.endsWith('/') && basePath.length > 1) {
+            basePath = basePath.slice(0, -1);
+          }
+          var newPath = basePath + '/' + redirect;
+          // Use replaceState to update URL without reloading
+          window.history.replaceState(null, '', newPath);
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

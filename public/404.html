@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Threads</title>
+    <script>
+      // Single Page Apps for GitHub Pages
+      // Redirect all 404 requests to index.html with the path stored in sessionStorage
+      // This works with client-side routing (React Router, Vue Router, etc.)
+      var pathSegmentsToKeep = 1; // Keep '/ai-threads' in the path
+      var l = window.location;
+      var path = l.pathname.split('/').slice(pathSegmentsToKeep + 1).join('/');
+      var search = l.search;
+      var hash = l.hash;
+      
+      // Store the path and redirect to index
+      sessionStorage.setItem('redirect', path + search + hash);
+      l.replace(l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') + 
+        l.pathname.split('/').slice(0, pathSegmentsToKeep + 1).join('/') + '/');
+    </script>
+  </head>
+  <body>
+    Redirecting...
+  </body>
+</html>

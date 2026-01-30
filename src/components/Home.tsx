@@ -2,11 +2,11 @@
  * Home view - thread list
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { useNavigate } from 'react-router-dom';
 import { useStores } from '../stores';
-import { IconPlus, IconSettings, IconStar, IconPin, IconTrash, IconExport, IconImport } from './Icons';
+import { IconPlus, IconSettings, IconStar, IconPin, IconTrash, IconExport, IconImport, IconHelp } from './Icons';
 import { exportAllData } from '../db';
 
 function formatDate(timestamp: number): string {
@@ -28,9 +28,10 @@ function formatDate(timestamp: number): string {
 }
 
 export const Home = observer(function Home() {
-  const { threadsStore } = useStores();
+  const { threadsStore, settingsStore } = useStores();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     threadsStore.loadThreads();
@@ -236,7 +237,72 @@ export const Home = observer(function Home() {
         <button className="toolbar-btn" onClick={handleImport} title="Import">
           <IconImport />
         </button>
+        <div className="toolbar-divider" />
+        <button className="toolbar-btn" onClick={() => setShowHelp(true)} title="Help">
+          <IconHelp />
+        </button>
       </div>
+
+      {/* Help Modal */}
+      {showHelp && (
+        <div className="modal-overlay" onClick={() => setShowHelp(false)}>
+          <div className="modal help-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">AI Threads</h2>
+              <button className="modal-close" onClick={() => setShowHelp(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <p className="help-description">
+                A thinking tool that generates AI-powered thought continuations to help you explore and develop ideas.
+              </p>
+              
+              <div className="help-section">
+                <h3>How it works</h3>
+                <ul className="help-list">
+                  <li>Create a thread and write your initial thought</li>
+                  <li>AI generates multiple continuation candidates</li>
+                  <li>Select the ones that resonate with you</li>
+                  <li>Keep exploring as new candidates appear</li>
+                </ul>
+              </div>
+
+              <div className="help-section">
+                <h3>Features</h3>
+                <ul className="help-list">
+                  <li><strong>Infinite stream</strong> — scroll down to generate more ideas</li>
+                  <li><strong>Smart selection</strong> — choosing a candidate removes skipped ones</li>
+                  <li><strong>Regenerate</strong> — tap sparkle button to get fresh candidates</li>
+                  <li><strong>Star thoughts</strong> — mark important ideas for later</li>
+                  <li><strong>Export/Import</strong> — backup and restore your threads</li>
+                  <li><strong>Custom prompts</strong> — set global or per-thread AI instructions</li>
+                </ul>
+              </div>
+
+              <div className="help-section">
+                <h3>Setup</h3>
+                <p className="help-text">
+                  To use AI generation, configure your API key in settings. 
+                  Supports OpenAI and Anthropic (Claude) models.
+                </p>
+                {!settingsStore.isConfigured && (
+                  <button 
+                    className="btn btn-primary help-setup-btn"
+                    onClick={() => {
+                      setShowHelp(false);
+                      navigate('/settings');
+                    }}
+                  >
+                    Setup AI Provider
+                  </button>
+                )}
+                {settingsStore.isConfigured && (
+                  <p className="help-configured">✓ AI is configured and ready</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
